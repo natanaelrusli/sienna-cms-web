@@ -145,15 +145,15 @@ class ApiService {
       headers: this.getAuthHeaders(),
     });
     const data = await this.handleResponse<
-      TextContent[] | { data?: TextContent[]; items?: TextContent[] }
+      TextContent[] | { contents?: TextContent[]; items?: TextContent[] }
     >(response);
 
     // Normalise different possible response shapes to an array
     if (Array.isArray(data)) {
       return data as TextContent[];
     }
-    if (Array.isArray(data?.data)) {
-      return data.data as TextContent[];
+    if (Array.isArray(data?.contents)) {
+      return data.contents as TextContent[];
     }
     if (Array.isArray(data?.items)) {
       return data.items as TextContent[];
