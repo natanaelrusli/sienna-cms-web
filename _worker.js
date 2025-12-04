@@ -3,15 +3,27 @@ export default {
     try {
       const url = new URL(request.url);
       
-      // Check if ASSETS is available
-      if (!env || !env.ASSETS) {
-        return new Response('ASSETS not available', { status: 500 });
+      // For Cloudflare Pages, ASSETS should be automatically available
+      // Check if ASSETS is available, with fallback for debugging
+      if (!env) {
+        return new Response('env not available', { status: 500 });
+      }
+      
+      // Try to get ASSETS binding (may be env.ASSETS or accessed differently)
+      const assets = env.ASSETS;
+      if (!assets) {
+        // Log available env keys for debugging
+        const envKeys = Object.keys(env).join(', ');
+        return new Response(`ASSETS not available. Env keys: ${envKeys || 'none'}`, { 
+          status: 500,
+          headers: { 'Content-Type': 'text/plain' }
+        });
       }
 
       // Only handle GET/HEAD requests for SPA routing
       if (request.method === 'GET' || request.method === 'HEAD') {
         // Try to fetch the requested resource first
-        const response = await env.ASSETS.fetch(request);
+        const response = await assets.fetch(request);
         
         // If found (status < 400), return it
         if (response.status < 400) {
@@ -27,7 +39,7 @@ export default {
             method: request.method,
             headers: request.headers,
           });
-          return env.ASSETS.fetch(indexRequest);
+          return assets.fetch(indexRequest);
         }
         
         // Return the 404 for other cases
