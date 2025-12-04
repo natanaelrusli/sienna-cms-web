@@ -20,11 +20,15 @@ import {
 } from "@/components/ui/dialog";
 import { useState } from "react";
 import { Plus, Edit, Trash2 } from "lucide-react";
+import ContentEditor from "@/components/ui/content-editor";
+import { Toaster, toast } from "sonner";
 
 export function TextContentManager() {
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState<boolean>(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({ key: "", content: "" });
 
   const { data: texts, isLoading } = useQuery({
@@ -57,15 +61,20 @@ export function TextContentManager() {
     mutationFn: (id: string) => apiService.deleteTextContent(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["textContents"] });
+      toast.success("Text content deleted successfully");
+    },
+    onError: () => {
+      toast.error("Failed to delete text content");
     },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const submitData = { ...formData };
     if (editingId) {
-      updateMutation.mutate({ id: editingId, data: formData });
+      updateMutation.mutate({ id: editingId, data: submitData });
     } else {
-      createMutation.mutate(formData);
+      createMutation.mutate(submitData);
     }
   };
 
@@ -87,6 +96,17 @@ export function TextContentManager() {
     setFormData({ key: "", content: "" });
   };
 
+  const handleOpenDeleteDialog = (id: string) => {
+    setIsDeleteDialogOpen(true);
+    setDeletingId(id);
+  };
+
+  const handleDelete = () => {
+    deleteMutation.mutate(deletingId!);
+    setIsDeleteDialogOpen(false);
+    setDeletingId(null);
+  };
+
   if (isLoading) {
     return <div>Loading...</div>;
   }
@@ -96,13 +116,34 @@ export function TextContentManager() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Text Content</h2>
-          <p className="text-muted-foreground">Manage text content by key</p>
         </div>
         <Button onClick={handleOpenCreate}>
           <Plus className="mr-2 h-4 w-4" />
           Add Text
         </Button>
       </div>
+
+      <Dialog
+        open={isDeleteDialogOpen}
+        onOpenChange={(open) => setIsDeleteDialogOpen(open)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Text Content</DialogTitle>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsDeleteDialogOpen(false)}
+            >
+              No, Return
+            </Button>
+            <Button variant="destructive" onClick={() => handleDelete()}>
+              Yes, Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={isDialogOpen}
@@ -113,14 +154,10 @@ export function TextContentManager() {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Text Content</DialogTitle>
-            <DialogDescription>
-              {editingId
-                ? "Update the text content below."
-                : "Add a new text content entry with a unique key."}
-            </DialogDescription>
+            <DialogDescription>Edit the text content below.</DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
@@ -138,14 +175,12 @@ export function TextContentManager() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="content">Content</Label>
-              <textarea
-                id="content"
-                className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                value={formData.content}
-                onChange={(e) =>
-                  setFormData({ ...formData, content: e.target.value })
+              <ContentEditor
+                initialContent={formData.content}
+                onChange={(content) =>
+                  setFormData((prev) => ({ ...prev, content }))
                 }
-                required
+                isOpen={isDialogOpen}
                 placeholder="Enter the text content..."
               />
             </div>
@@ -168,14 +203,14 @@ export function TextContentManager() {
         </DialogContent>
       </Dialog>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <div className="flex flex-col gap-4">
         {Array.isArray(texts) &&
           texts.map((text) => (
             <Card key={text.id} className="flex flex-col justify-between">
               <CardHeader>
                 <CardTitle className="text-lg">{text.key}</CardTitle>
                 <CardDescription className="line-clamp-2">
-                  {text.content}
+                  <div dangerouslySetInnerHTML={{ __html: text.content }} />
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -190,11 +225,7 @@ export function TextContentManager() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => {
-                      if (confirm("Are you sure you want to delete this?")) {
-                        deleteMutation.mutate(text.id!);
-                      }
-                    }}
+                    onClick={() => handleOpenDeleteDialog(text.id!)}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -203,6 +234,8 @@ export function TextContentManager() {
             </Card>
           ))}
       </div>
+
+      <Toaster />
     </div>
   );
 }
