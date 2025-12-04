@@ -22,27 +22,26 @@ export default {
 
       // Only handle GET/HEAD requests for SPA routing
       if (request.method === 'GET' || request.method === 'HEAD') {
-        // Try to fetch the requested resource first
+        // Since _routes.json excludes static files, this worker only receives SPA routes
+        // First, try to fetch the requested resource (in case it's a real file)
         const response = await assets.fetch(request);
         
-        // If found (status < 400), return it
+        // If the file exists, return it
         if (response.status < 400) {
           return response;
         }
         
-        // If not found and looks like an SPA route, serve index.html
-        const hasFileExtension = url.pathname.includes('.');
+        // For 404s, check if this looks like an SPA route (not /api)
         const isApiRoute = url.pathname.startsWith('/api');
         
-        if (!hasFileExtension && !isApiRoute) {
-          const indexRequest = new Request(new URL('/index.html', request.url), {
-            method: request.method,
-            headers: request.headers,
-          });
+        if (!isApiRoute) {
+          // Serve index.html for all SPA routes
+          // This allows React Router to handle client-side routing
+          const indexRequest = new Request(new URL('/index.html', request.url), request);
           return assets.fetch(indexRequest);
         }
         
-        // Return the 404 for other cases
+        // Return 404 for API routes
         return response;
       }
 
