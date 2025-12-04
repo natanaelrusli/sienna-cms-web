@@ -1,9 +1,11 @@
 import { setCookie, getCookie, deleteCookie } from "@/lib/cookies";
 
-// Use relative URL in development (proxied through Vite) or absolute in production
-const API_BASE_URL = import.meta.env.PROD
-  ? "http://localhost:8080/api/v1"
-  : "/api/v1";
+// Use environment variable if set, otherwise fallback to default behavior
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.PROD
+    ? "http://localhost:8080/api/v1"
+    : "/api/v1");
 
 export interface User {
   id?: string;
