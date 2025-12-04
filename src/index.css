@@ -118,3 +118,18 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Quill editor scrollable styles */
+.quill-editor-wrapper .ql-container {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.quill-editor-wrapper .ql-editor {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.ql-toolbar.ql-snow {
+  margin-bottom: 0px;
+}
