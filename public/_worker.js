@@ -22,9 +22,18 @@ export default {
       return env.ASSETS.fetch(request);
     }
 
-    // For all other routes, serve index.html (SPA fallback)
-    const indexRequest = new Request(new URL('/index.html', request.url), request);
-    return env.ASSETS.fetch(indexRequest);
+    // Only serve index.html for GET/HEAD requests (SPA fallback)
+    // This allows API routes or other methods to work if needed
+    if (request.method === 'GET' || request.method === 'HEAD') {
+      const indexRequest = new Request(new URL('/index.html', request.url), {
+        method: request.method,
+        headers: request.headers,
+      });
+      return env.ASSETS.fetch(indexRequest);
+    }
+
+    // For other methods, return 405 Method Not Allowed
+    return new Response('Method Not Allowed', { status: 405 });
   }
 };
 
