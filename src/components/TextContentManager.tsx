@@ -39,32 +39,54 @@ export function TextContentManager() {
   const createMutation = useMutation({
     mutationFn: (data: Omit<TextContent, "id" | "createdAt" | "updatedAt">) =>
       apiService.createTextContent(data),
+    onMutate: () => {
+      toast.loading("Creating data...");
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["textContents"] });
       setIsDialogOpen(false);
       setFormData({ key: "", content: "" });
+      toast.dismiss();
+      toast.success("Text content created successfully");
+    },
+    onError: () => {
+      toast.error("Failed to create text content, please try again.");
     },
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<TextContent> }) =>
       apiService.updateTextContent(id, data),
+    onMutate: () => {
+      toast.loading("Updating data...");
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["textContents"] });
+      toast.dismiss();
+      toast.success("Text content updated successfully");
       setIsDialogOpen(false);
       setEditingId(null);
       setFormData({ key: "", content: "" });
+    },
+    onError: () => {
+      toast.error("Failed to update text content, please try again.");
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiService.deleteTextContent(id),
+    onMutate: () => {
+      toast.loading("Deleting data...");
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["textContents"] });
+      toast.dismiss();
       toast.success("Text content deleted successfully");
+      setIsDeleteDialogOpen(false);
+      setDeletingId(null);
     },
     onError: () => {
-      toast.error("Failed to delete text content");
+      toast.error("Failed to delete text content, please try again.");
     },
   });
 
@@ -103,8 +125,6 @@ export function TextContentManager() {
 
   const handleDelete = () => {
     deleteMutation.mutate(deletingId!);
-    setIsDeleteDialogOpen(false);
-    setDeletingId(null);
   };
 
   if (isLoading) {
@@ -127,20 +147,30 @@ export function TextContentManager() {
         open={isDeleteDialogOpen}
         onOpenChange={(open) => setIsDeleteDialogOpen(open)}
       >
-        <DialogContent>
+        <DialogContent showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle>Delete Text Content</DialogTitle>
+            <DialogTitle>Delete Data?</DialogTitle>
+            <DialogDescription className="mt-3">
+              Are you sure you want to delete this data?
+            </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setIsDeleteDialogOpen(false)}
-            >
-              No, Return
-            </Button>
-            <Button variant="destructive" onClick={() => handleDelete()}>
-              Yes, Delete
-            </Button>
+            <div className="flex gap-2 mt-4">
+              <Button
+                variant="outline"
+                onClick={() => setIsDeleteDialogOpen(false)}
+                disabled={deleteMutation.isPending}
+              >
+                No, Return
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => handleDelete()}
+                disabled={deleteMutation.isPending}
+              >
+                Yes, Delete
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -154,7 +184,7 @@ export function TextContentManager() {
           }
         }}
       >
-        <DialogContent className="overflow-y-auto">
+        <DialogContent className="overflow-y-auto" showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>Text Content</DialogTitle>
             <DialogDescription>Edit the text content below.</DialogDescription>
