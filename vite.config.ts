@@ -14,6 +14,15 @@ export default defineConfig({
   define: {
     global: "globalThis",
   },
+  build: {
+    chunkSizeWarningLimit: 1000,
+    minify: "esbuild",
+    target: "esnext",
+    cssMinify: true,
+  },
+  esbuild: {
+    logOverride: { "this-is-undefined-in-esm": "silent" },
+  },
   server: {
     proxy: {
       "/api": {
