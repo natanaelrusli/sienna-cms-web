@@ -63,6 +63,9 @@ export interface PageConfig {
 }
 
 class ApiService {
+  private isRefreshing = false;
+  private refreshPromise: Promise<boolean> | null = null;
+
   private getAuthHeaders(includeContentType: boolean = true): HeadersInit {
     const token = getCookie("token");
     const headers: HeadersInit = {};
@@ -90,6 +93,98 @@ class ApiService {
     return response.json();
   }
 
+  /**
+   * Attempts to refresh the access token using the refresh token
+   * Returns true if refresh was successful, false otherwise
+   */
+  private async attemptTokenRefresh(): Promise<boolean> {
+    const refreshToken = getCookie("refreshToken");
+    if (!refreshToken) {
+      return false;
+    }
+
+    try {
+      await this.refreshToken(refreshToken);
+      return true;
+    } catch {
+      // Refresh failed, clear tokens
+      deleteCookie("token");
+      deleteCookie("refreshToken");
+      return false;
+    }
+  }
+
+  /**
+   * Fetches with automatic token refresh on 401 responses
+   * Retries the request once after refreshing the token
+   */
+  private async fetchWithAuth(
+    url: string,
+    options: RequestInit = {},
+    retryOn401: boolean = true
+  ): Promise<Response> {
+    // Make the initial request
+    let response = await fetch(url, options);
+
+    // If we get a 401 and retry is enabled, try to refresh the token
+    if (response.status === 401 && retryOn401) {
+      // Prevent multiple simultaneous refresh attempts
+      const isRefreshInitiator = !this.isRefreshing;
+      if (isRefreshInitiator) {
+        this.isRefreshing = true;
+        this.refreshPromise = this.attemptTokenRefresh();
+      }
+
+      // Wait for the refresh to complete (or fail)
+      const refreshSuccess = await this.refreshPromise;
+
+      if (refreshSuccess) {
+        // Update the authorization header with the new token
+        const newToken = getCookie("token");
+        if (newToken) {
+          // Create new headers object, preserving existing headers
+          const newHeaders = new Headers();
+
+          // Copy existing headers if they exist
+          if (options.headers) {
+            if (options.headers instanceof Headers) {
+              options.headers.forEach((value, key) => {
+                newHeaders.set(key, value);
+              });
+            } else if (Array.isArray(options.headers)) {
+              options.headers.forEach(([key, value]) => {
+                newHeaders.set(key, value);
+              });
+            } else {
+              Object.entries(options.headers).forEach(([key, value]) => {
+                if (value) {
+                  newHeaders.set(key, value);
+                }
+              });
+            }
+          }
+
+          // Update or set the Authorization header
+          newHeaders.set("Authorization", `Bearer ${newToken}`);
+
+          // Retry the original request with the new token
+          response = await fetch(url, {
+            ...options,
+            headers: newHeaders,
+          });
+        }
+      }
+
+      // Only reset refresh state if we initiated it
+      if (isRefreshInitiator) {
+        this.isRefreshing = false;
+        this.refreshPromise = null;
+      }
+    }
+
+    return response;
+  }
+
   // Auth endpoints
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     const response = await fetch(`${API_BASE_URL}/auth/login`, {
@@ -108,7 +203,7 @@ class ApiService {
   }
 
   async logout(): Promise<void> {
-    await fetch(`${API_BASE_URL}/auth/logout`, {
+    await this.fetchWithAuth(`${API_BASE_URL}/auth/logout`, {
       method: "POST",
       headers: this.getAuthHeaders(),
     });
@@ -133,7 +228,7 @@ class ApiService {
   }
 
   async getCurrentUser(): Promise<User> {
-    const response = await fetch(`${API_BASE_URL}/auth/me`, {
+    const response = await this.fetchWithAuth(`${API_BASE_URL}/auth/me`, {
       headers: this.getAuthHeaders(),
     });
     return this.handleResponse<User>(response);
@@ -141,7 +236,7 @@ class ApiService {
 
   // Text Content endpoints
   async getTextContents(): Promise<TextContent[]> {
-    const response = await fetch(`${API_BASE_URL}/cms/text`, {
+    const response = await this.fetchWithAuth(`${API_BASE_URL}/cms/text`, {
       headers: this.getAuthHeaders(),
     });
     const data = await this.handleResponse<
@@ -164,23 +259,29 @@ class ApiService {
   }
 
   async getTextContentById(id: string): Promise<TextContent> {
-    const response = await fetch(`${API_BASE_URL}/cms/text/${id}`, {
-      headers: this.getAuthHeaders(),
-    });
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/cms/text/${id}`,
+      {
+        headers: this.getAuthHeaders(),
+      }
+    );
     return this.handleResponse<TextContent>(response);
   }
 
   async getTextContentByKey(key: string): Promise<TextContent> {
-    const response = await fetch(`${API_BASE_URL}/cms/text/key/${key}`, {
-      headers: this.getAuthHeaders(),
-    });
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/cms/text/key/${key}`,
+      {
+        headers: this.getAuthHeaders(),
+      }
+    );
     return this.handleResponse<TextContent>(response);
   }
 
   async createTextContent(
     data: Omit<TextContent, "id" | "createdAt" | "updatedAt">
   ): Promise<TextContent> {
-    const response = await fetch(`${API_BASE_URL}/cms/text`, {
+    const response = await this.fetchWithAuth(`${API_BASE_URL}/cms/text`, {
       method: "POST",
       headers: this.getAuthHeaders(),
       body: JSON.stringify(data),
@@ -192,16 +293,19 @@ class ApiService {
     id: string,
     data: Partial<TextContent>
   ): Promise<TextContent> {
-    const response = await fetch(`${API_BASE_URL}/cms/text/${id}`, {
-      method: "PUT",
-      headers: this.getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/cms/text/${id}`,
+      {
+        method: "PUT",
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
     return this.handleResponse<TextContent>(response);
   }
 
   async deleteTextContent(id: string): Promise<void> {
-    await fetch(`${API_BASE_URL}/cms/text/${id}`, {
+    await this.fetchWithAuth(`${API_BASE_URL}/cms/text/${id}`, {
       method: "DELETE",
       headers: this.getAuthHeaders(),
     });
@@ -210,9 +314,12 @@ class ApiService {
   // Blog endpoints
   async getBlogPosts(published?: boolean): Promise<BlogPost[]> {
     const params = published !== undefined ? `?published=${published}` : "";
-    const response = await fetch(`${API_BASE_URL}/cms/blog${params}`, {
-      headers: this.getAuthHeaders(),
-    });
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/cms/blog${params}`,
+      {
+        headers: this.getAuthHeaders(),
+      }
+    );
     const data = await this.handleResponse<
       BlogPost[] | { data?: BlogPost[]; items?: BlogPost[] }
     >(response);
@@ -233,23 +340,29 @@ class ApiService {
   }
 
   async getBlogPostById(id: string): Promise<BlogPost> {
-    const response = await fetch(`${API_BASE_URL}/cms/blog/${id}`, {
-      headers: this.getAuthHeaders(),
-    });
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/cms/blog/${id}`,
+      {
+        headers: this.getAuthHeaders(),
+      }
+    );
     return this.handleResponse<BlogPost>(response);
   }
 
   async getBlogPostBySlug(slug: string): Promise<BlogPost> {
-    const response = await fetch(`${API_BASE_URL}/cms/blog/slug/${slug}`, {
-      headers: this.getAuthHeaders(),
-    });
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/cms/blog/slug/${slug}`,
+      {
+        headers: this.getAuthHeaders(),
+      }
+    );
     return this.handleResponse<BlogPost>(response);
   }
 
   async createBlogPost(
     data: Omit<BlogPost, "id" | "createdAt" | "updatedAt">
   ): Promise<BlogPost> {
-    const response = await fetch(`${API_BASE_URL}/cms/blog`, {
+    const response = await this.fetchWithAuth(`${API_BASE_URL}/cms/blog`, {
       method: "POST",
       headers: this.getAuthHeaders(),
       body: JSON.stringify(data),
@@ -258,16 +371,19 @@ class ApiService {
   }
 
   async updateBlogPost(id: string, data: Partial<BlogPost>): Promise<BlogPost> {
-    const response = await fetch(`${API_BASE_URL}/cms/blog/${id}`, {
-      method: "PUT",
-      headers: this.getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/cms/blog/${id}`,
+      {
+        method: "PUT",
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
     return this.handleResponse<BlogPost>(response);
   }
 
   async deleteBlogPost(id: string): Promise<void> {
-    await fetch(`${API_BASE_URL}/cms/blog/${id}`, {
+    await this.fetchWithAuth(`${API_BASE_URL}/cms/blog/${id}`, {
       method: "DELETE",
       headers: this.getAuthHeaders(),
     });
@@ -275,9 +391,12 @@ class ApiService {
 
   // Page Config endpoints
   async getPageConfigs(): Promise<PageConfig[]> {
-    const response = await fetch(`${API_BASE_URL}/cms/page-config`, {
-      headers: this.getAuthHeaders(),
-    });
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/cms/page-config`,
+      {
+        headers: this.getAuthHeaders(),
+      }
+    );
     const data = await this.handleResponse<
       PageConfig[] | { data?: PageConfig[]; items?: PageConfig[] }
     >(response);
@@ -298,14 +417,17 @@ class ApiService {
   }
 
   async getPageConfigById(id: string): Promise<PageConfig> {
-    const response = await fetch(`${API_BASE_URL}/cms/page-config/${id}`, {
-      headers: this.getAuthHeaders(),
-    });
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/cms/page-config/${id}`,
+      {
+        headers: this.getAuthHeaders(),
+      }
+    );
     return this.handleResponse<PageConfig>(response);
   }
 
   async getPageConfigByKey(pageKey: string): Promise<PageConfig> {
-    const response = await fetch(
+    const response = await this.fetchWithAuth(
       `${API_BASE_URL}/cms/page-config/key/${pageKey}`,
       {
         headers: this.getAuthHeaders(),
@@ -317,11 +439,14 @@ class ApiService {
   async createPageConfig(
     data: Omit<PageConfig, "id" | "createdAt" | "updatedAt">
   ): Promise<PageConfig> {
-    const response = await fetch(`${API_BASE_URL}/cms/page-config`, {
-      method: "POST",
-      headers: this.getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/cms/page-config`,
+      {
+        method: "POST",
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
     return this.handleResponse<PageConfig>(response);
   }
 
@@ -329,16 +454,19 @@ class ApiService {
     id: string,
     data: Partial<PageConfig>
   ): Promise<PageConfig> {
-    const response = await fetch(`${API_BASE_URL}/cms/page-config/${id}`, {
-      method: "PUT",
-      headers: this.getAuthHeaders(),
-      body: JSON.stringify(data),
-    });
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/cms/page-config/${id}`,
+      {
+        method: "PUT",
+        headers: this.getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
     return this.handleResponse<PageConfig>(response);
   }
 
   async deletePageConfig(id: string): Promise<void> {
-    await fetch(`${API_BASE_URL}/cms/page-config/${id}`, {
+    await this.fetchWithAuth(`${API_BASE_URL}/cms/page-config/${id}`, {
       method: "DELETE",
       headers: this.getAuthHeaders(),
     });
@@ -351,7 +479,7 @@ class ApiService {
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
     }
-    const response = await fetch(`${API_BASE_URL}/images`, {
+    const response = await this.fetchWithAuth(`${API_BASE_URL}/images`, {
       headers,
     });
     const data = await this.handleResponse<
@@ -377,7 +505,7 @@ class ApiService {
     const formData = new FormData();
     formData.append("file", file);
     const token = getCookie("token");
-    const response = await fetch(`${API_BASE_URL}/image/upload`, {
+    const response = await this.fetchWithAuth(`${API_BASE_URL}/image/upload`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       body: formData,
@@ -389,11 +517,14 @@ class ApiService {
     const formData = new FormData();
     formData.append("file", file);
     const token = getCookie("token");
-    const response = await fetch(`${API_BASE_URL}/image/compress`, {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: formData,
-    });
+    const response = await this.fetchWithAuth(
+      `${API_BASE_URL}/image/compress`,
+      {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      }
+    );
     return this.handleResponse<ImageUploadResponse>(response);
   }
 
