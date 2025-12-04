@@ -5,11 +5,5 @@
   "assets": {
     "directory": "./dist"
   },
-  "routes": [
-    {
-      "pattern": "**",
-      "zone_name": "https://sienna-cms-web.natanael280198.workers.dev"
-    }
-  ],
   "main": "./_worker.js"
 }
